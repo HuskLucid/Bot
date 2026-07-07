@@ -76,11 +76,11 @@ async def bulk_forward(event):
         return
         
     count = int(event.pattern_match.group(1))
-    await event.edit(f"⏳ **Processing Bulk Forwarding via User Engine...**\n`{count}` posts copy ho rahi hain...")
+    await event.edit(f"⏳ **Processing Bulk Forwarding...**\n`{count}` restricted posts copy ho rahi hain...")
     
     messages_to_forward = []
-    # User client safely read karega messages (Isme online status trigger nahi hota)
-    async for msg in user_client.iter_messages(SOURCE_CHAT, limit=count):
+    async_messages = user_client.iter_messages(SOURCE_CHAT, limit=count)
+    async for msg in async_messages:
         messages_to_forward.append(msg)
     
     messages_to_forward.reverse()
@@ -89,10 +89,8 @@ async def bulk_forward(event):
     for msg in messages_to_forward:
         try:
             if msg.media and not msg.sticker:
-                # User download karega local me
                 media_file = await user_client.download_media(msg)
                 if media_file:
-                    # Bot upload karega destination me
                     await bot_send_media(DEST_CHAT, media_file, msg, is_sticker=False)
                     try: os.remove(media_file) 
                     except: pass
@@ -142,13 +140,16 @@ async def main_forwarder(event):
         except Exception as e:
             print(f"[LIVE ERROR] {str(e)}")
 
-if __name__ == "__main__":
+# MODERN ASYNCIO RUN FUNCTION FOR PYTHON 3.13
+async def start_engines():
     print("🚀 Telethon Hybrid Engine Activating...")
-    loop = asyncio.get_event_loop()
-    
-    # Dono clients ko parallel chalane ka sahi tareeqa
-    loop.run_until_complete(user_client.start())
-    loop.run_until_complete(helper_bot.start(bot_token=BOT_TOKEN))
-    
+    # Dono clients ko start karna bina loop mismatch ke
+    await user_client.start()
+    await helper_bot.start(bot_token=BOT_TOKEN)
     print("🚀 Dual Engine Successfully Activated 24/7!")
-    user_client.run_until_disconnected()
+    # Keep running
+    await user_client.run_until_disconnected()
+
+if __name__ == "__main__":
+    # Python 3.13 full support fix
+    asyncio.run(start_engines())
