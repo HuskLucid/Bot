@@ -7,7 +7,7 @@ from telethon.errors import FloodWaitError
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "your_hash")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")  # Bot token jo upload ka kaam karega
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 def parse_chat_id(env_value):
     if not env_value:
@@ -25,15 +25,15 @@ DEST_CHAT = parse_chat_id(os.environ.get("DEST_CHAT", ""))
 
 from telethon.sessions import StringSession
 
-# 1. Tumhara Personal Account (Sirf read karega, hamesha offline rahega)
+# User Engine (Sirf Read/Download karega - Fully Invisible)
 user_client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-# 2. Helper Robot Bot (Yeh upload karega, isliye tum online nahi dikhoge)
+# Bot Engine (Sirf Upload/Post karega Destination me)
 helper_bot = TelegramClient('helper_bot_session', API_ID, API_HASH)
 
 print("=== TELETHON ULTRA SECURE FORWARDER STARTING ===")
 
-# Helper: Media Sender (Yeh kaam ab ROBOT bot karega, tum nahi!)
-async def safe_send(entity, file_path, msg_obj, is_sticker=False):
+# Helper: Media Sender via Bot
+async def bot_send_media(entity, file_path, msg_obj, is_sticker=False):
     try:
         if is_sticker:
             await helper_bot.send_file(entity=entity, file=file_path)
@@ -47,10 +47,10 @@ async def safe_send(entity, file_path, msg_obj, is_sticker=False):
     except FloodWaitError as e:
         await asyncio.sleep(e.seconds + 2)
     except Exception as err:
-        print(f"[SEND ERROR] {str(err)}")
+        print(f"[BOT SEND ERROR] {str(err)}")
 
-# Helper: Text Sender (Yeh bhi robot bot karega)
-async def safe_send_text(entity, msg_obj):
+# Helper: Text Sender via Bot
+async def bot_send_text(entity, msg_obj):
     try:
         await helper_bot.send_message(
             entity=entity,
@@ -60,26 +60,26 @@ async def safe_send_text(entity, msg_obj):
     except FloodWaitError as e:
         await asyncio.sleep(e.seconds + 2)
     except Exception as err:
-        print(f"[TEXT ERROR] {str(err)}")
+        print(f"[BOT TEXT ERROR] {str(err)}")
 
-# BULK FORWARDING: Ab ye tab chalegi jab tum DESTINATION CHANNEL me command likhoge
+# BULK FORWARDING FROM DESTINATION CHANNEL
 @user_client.on(events.NewMessage(pattern=r",forward (\d+)", outgoing=True))
 async def bulk_forward(event):
     global SOURCE_CHAT, DEST_CHAT
     
-    # Check ki command usi destination channel me maari gayi ho jo variable me set hai
+    # Check ki command sirf hmare destination channel me hi trigger ho
     if event.chat_id != DEST_CHAT:
         return
 
     if not SOURCE_CHAT or not DEST_CHAT:
-        await event.edit("❌ **Railway Variables me SOURCE_CHAT/DEST_CHAT nahi mila!**")
+        await event.edit("❌ **Railway Variables check karo! SOURCE_CHAT/DEST_CHAT missing hai.**")
         return
         
     count = int(event.pattern_match.group(1))
-    await event.edit(f"⏳ **Processing Bulk Forwarding...**\n`{count}` restricted posts copy ho rahi hain (Tu 100% offline hai)...")
+    await event.edit(f"⏳ **Processing Bulk Forwarding via User Engine...**\n`{count}` posts copy ho rahi hain...")
     
     messages_to_forward = []
-    # User account chupchaap restricted channel se message read karega (Isme online nahi dikhte)
+    # User client safely read karega messages (Isme online status trigger nahi hota)
     async for msg in user_client.iter_messages(SOURCE_CHAT, limit=count):
         messages_to_forward.append(msg)
     
@@ -89,30 +89,31 @@ async def bulk_forward(event):
     for msg in messages_to_forward:
         try:
             if msg.media and not msg.sticker:
+                # User download karega local me
                 media_file = await user_client.download_media(msg)
                 if media_file:
-                    # Helper bot ko bolenge ki tu post kar destination me
-                    await safe_send(DEST_CHAT, media_file, msg, is_sticker=False)
+                    # Bot upload karega destination me
+                    await bot_send_media(DEST_CHAT, media_file, msg, is_sticker=False)
                     try: os.remove(media_file) 
                     except: pass
                 success_count += 1
             elif msg.sticker:
                 sticker_file = await user_client.download_media(msg)
                 if sticker_file:
-                    await safe_send(DEST_CHAT, sticker_file, msg, is_sticker=True)
+                    await bot_send_media(DEST_CHAT, sticker_file, msg, is_sticker=True)
                     try: os.remove(sticker_file)
                     except: pass
                 success_count += 1
             elif msg.message:
-                await safe_send_text(DEST_CHAT, msg)
+                await bot_send_text(DEST_CHAT, msg)
                 success_count += 1
             
             await asyncio.sleep(1.5)
             
         except Exception as e:
-            print(f"[BULK ERROR] {str(e)}")
+            print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}")
             
-    await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully copied.")
+    await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully copied by Bot.")
 
 # LIVE FORWARDER
 @user_client.on(events.NewMessage)
@@ -126,28 +127,28 @@ async def main_forwarder(event):
             if event.media and not event.sticker:
                 media_file = await user_client.download_media(event.message)
                 if media_file:
-                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=False)
+                    await bot_send_media(DEST_CHAT, media_file, event.message, is_sticker=False)
                     try: os.remove(media_file)
                     except: pass
             elif event.sticker:
                 media_file = await user_client.download_media(event.message)
                 if media_file:
-                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=True)
+                    await bot_send_media(DEST_CHAT, media_file, event.message, is_sticker=True)
                     try: os.remove(media_file)
                     except: pass
             elif event.message.message:
-                await safe_send_text(DEST_CHAT, event.message)
+                await bot_send_text(DEST_CHAT, event.message)
                 
         except Exception as e:
             print(f"[LIVE ERROR] {str(e)}")
 
-async def main():
-    # Dono clients ko ek sath chalana
-    await user_client.start()
-    await helper_bot.start(bot_token=BOT_TOKEN)
-    print("🚀 Dual Engine (User + Robot Bot) Successfully Activated 24/7!")
-    await user_client.run_until_disconnected()
-
 if __name__ == "__main__":
+    print("🚀 Telethon Hybrid Engine Activating...")
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    
+    # Dono clients ko parallel chalane ka sahi tareeqa
+    loop.run_until_complete(user_client.start())
+    loop.run_until_complete(helper_bot.start(bot_token=BOT_TOKEN))
+    
+    print("🚀 Dual Engine Successfully Activated 24/7!")
+    user_client.run_until_disconnected()
