@@ -28,58 +28,101 @@ bot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 print("=== TELETHON ULTRA FORWARDER STARTING ===")
 
-# STEALTH MODE: Is baar interval 2 second hai aur har action se pehle trigger hoga
-async def force_offline():
-    try:
-        await bot(UpdateStatusRequest(offline=True))
-    except:
-        pass
-
+# STRICT GHOST MODE: Har 2 second me offline status force karega
 async def keep_offline_loop():
     while True:
-        await force_offline()
-        await asyncio.sleep(3)
+        try:
+            await bot(UpdateStatusRequest(offline=True))
+        except:
+            pass
+        await asyncio.sleep(2)
 
-# 4. FIXED BULK FORWARDING (Direct Server Forwarding - Zero Uploading, Fully Invisible)
+# Safely Media Sender (Bypasses restriction by uploading fresh)
+async def safe_send(entity, file_path, msg_obj, is_sticker=False):
+    try:
+        await bot(UpdateStatusRequest(offline=True)) # Action se pehle offline push
+        if is_sticker:
+            await bot.send_file(entity=entity, file=file_path)
+        else:
+            await bot.send_file(
+                entity=entity,
+                file=file_path,
+                caption=msg_obj.message,
+                formatting_entities=msg_obj.entities
+            )
+        await bot(UpdateStatusRequest(offline=True)) # Action ke turant baad offline push
+    except FloodWaitError as e:
+        await asyncio.sleep(e.seconds + 2)
+    except Exception as err:
+        print(f"[SEND ERROR] {str(err)}")
+
+# Safely Text Sender
+async def safe_send_text(entity, msg_obj):
+    try:
+        await bot(UpdateStatusRequest(offline=True))
+        await bot.send_message(
+            entity=entity,
+            message=msg_obj.message,
+            formatting_entities=msg_obj.entities
+        )
+        await bot(UpdateStatusRequest(offline=True))
+    except FloodWaitError as e:
+        await asyncio.sleep(e.seconds + 2)
+    except Exception as err:
+        print(f"[TEXT ERROR] {str(err)}")
+
+# BULK FORWARDING FROM SAVED MESSAGES (Anti-Restrict Version)
 @bot.on(events.NewMessage(pattern=r",forward (\d+)", outgoing=True))
 async def bulk_forward(event):
     global SOURCE_CHAT, DEST_CHAT
     
+    # Target Saved Messages Check
+    me = await bot.get_me()
+    if event.chat_id != me.id:
+        return
+
     if not SOURCE_CHAT or not DEST_CHAT:
-        await event.edit("❌ **Railway Variables check karo! SOURCE_CHAT/DEST_CHAT missing hai.**")
+        await event.edit("❌ **Railway Variables missing hain!**")
         return
         
     count = int(event.pattern_match.group(1))
-    await event.edit(f"⏳ **Direct Server-Side Copy Active!**\nPichle `{count}` messages bina online aaye bhej raha hoon...")
+    await event.edit(f"⏳ **Anti-Restrict Bulk Active!**\nDownloading & re-uploading `{count}` posts...")
     
-    # Source chat se saare message IDs nikalna
-    msg_ids = []
+    messages_to_forward = []
     async for msg in bot.iter_messages(SOURCE_CHAT, limit=count):
-        msg_ids.append(msg.id)
+        messages_to_forward.append(msg)
     
-    # Purane se naye sequence me karne ke liye reverse
-    msg_ids.reverse()
+    messages_to_forward.reverse()
     
-    # Chunk me forward karna taaki flood wait na aaye
     success_count = 0
-    chunk_size = 10  # Ek baar me 10 message
-    
-    for i in range(0, len(msg_ids), chunk_size):
-        await force_offline() # Send karne se theek pehle offline push karna
-        chunk = msg_ids[i:i+chunk_size]
+    for msg in messages_to_forward:
         try:
-            # Direct server forward logic (Isme download/upload nahi hota, direct copy hota hai)
-            await bot.forward_messages(DEST_CHAT, chunk, SOURCE_CHAT)
-            success_count += len(chunk)
-            await asyncio.sleep(2)  # Safe delay
-        except FloodWaitError as e:
-            await asyncio.sleep(e.seconds + 2)
-        except Exception as e:
-            print(f"[BULK CHUNK ERROR] {str(e)}")
+            if msg.media and not msg.sticker:
+                media_file = await bot.download_media(msg)
+                if media_file:
+                    await safe_send(DEST_CHAT, media_file, msg, is_sticker=False)
+                    try: os.remove(media_file) 
+                    except: pass
+                success_count += 1
+            elif msg.sticker:
+                sticker_file = await bot.download_media(msg)
+                if sticker_file:
+                    await safe_send(DEST_CHAT, sticker_file, msg, is_sticker=True)
+                    try: os.remove(sticker_file)
+                    except: pass
+                success_count += 1
+            elif msg.message:
+                await safe_send_text(DEST_CHAT, msg)
+                success_count += 1
             
-    await event.respond(f"✅ **Done!** `{success_count}` messages safely copied via server.")
+            await asyncio.sleep(1.5)
+            
+        except Exception as e:
+            print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}")
+            
+    await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully re-uploaded.")
 
-# 5. LIVE FORWARDER (With Anti-Online Guard)
+# LIVE FORWARDER (Anti-Restrict Version)
 @bot.on(events.NewMessage)
 async def main_forwarder(event):
     global SOURCE_CHAT, DEST_CHAT
@@ -87,10 +130,22 @@ async def main_forwarder(event):
         return
         
     if event.chat_id == SOURCE_CHAT:
-        await force_offline() # Live message aate hi pehle offline force karo
         try:
-            # Direct forward single message to prevent downloading overhead
-            await bot.forward_messages(DEST_CHAT, event.message)
+            if event.media and not event.sticker:
+                media_file = await bot.download_media(event.message)
+                if media_file:
+                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=False)
+                    try: os.remove(media_file)
+                    except: pass
+            elif event.sticker:
+                media_file = await bot.download_media(event.message)
+                if media_file:
+                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=True)
+                    try: os.remove(media_file)
+                    except: pass
+            elif event.message.message:
+                await safe_send_text(DEST_CHAT, event.message)
+                
         except Exception as e:
             print(f"[LIVE ERROR] {str(e)}")
 
