@@ -4,127 +4,82 @@ from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.functions.account import UpdateStatusRequest
 
-# --- CONFIGURATION FROM RAILWAY VARIABLES ---
+# --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "your_hash")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
 
-# Ab IDs seedha Railway se load hongi, kisi command ki zaroorat nahi
-try:
-    SOURCE_CHAT = int(os.environ.get("SOURCE_CHAT", 0))
-except:
-    SOURCE_CHAT = os.environ.get("SOURCE_CHAT", "")
+def parse_chat_id(env_value):
+    if not env_value:
+        return None
+    val = str(env_value).strip()
+    if val.startswith('-100') or val.startswith('-') or val.isalpha():
+        try: return int(val)
+        except: return val
+    else:
+        try: return int(f"-100{val}")
+        except: return val
 
-try:
-    DEST_CHAT = int(os.environ.get("DEST_CHAT", 0))
-except:
-    DEST_CHAT = os.environ.get("DEST_CHAT", "")
+SOURCE_CHAT = parse_chat_id(os.environ.get("SOURCE_CHAT", ""))
+DEST_CHAT = parse_chat_id(os.environ.get("DEST_CHAT", ""))
 
 from telethon.sessions import StringSession
 bot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 print("=== TELETHON ULTRA FORWARDER STARTING ===")
 
-# GHOST MODE FUNCTION (Hamesha Offline rakhne ke liye)
-async def keep_offline():
+# STEALTH MODE: Is baar interval 2 second hai aur har action se pehle trigger hoga
+async def force_offline():
+    try:
+        await bot(UpdateStatusRequest(offline=True))
+    except:
+        pass
+
+async def keep_offline_loop():
     while True:
-        try:
-            await bot(UpdateStatusRequest(offline=True))
-        except Exception:
-            pass
-        await asyncio.sleep(30)
+        await force_offline()
+        await asyncio.sleep(3)
 
-# Safely Media Sender
-async def safe_send(entity, file_path, msg_obj, is_sticker=False):
-    retry = True
-    while retry:
-        try:
-            if is_sticker:
-                await bot.send_file(entity=entity, file=file_path)
-            else:
-                await bot.send_file(
-                    entity=entity,
-                    file=file_path,
-                    caption=msg_obj.message,
-                    formatting_entities=msg_obj.entities
-                )
-            retry = False
-        except FloodWaitError as e:
-            print(f"[FLOOD WAIT] Waiting for {e.seconds}s...")
-            await asyncio.sleep(e.seconds + 2)
-        except Exception as err:
-            print(f"[SEND ERROR] {str(err)}")
-            retry = False
-
-# Safely Text Sender
-async def safe_send_text(entity, msg_obj):
-    retry = True
-    while retry:
-        try:
-            await bot.send_message(
-                entity=entity,
-                message=msg_obj.message,
-                formatting_entities=msg_obj.entities
-            )
-            retry = False
-        except FloodWaitError as e:
-            print(f"[FLOOD WAIT] Waiting for {e.seconds}s...")
-            await asyncio.sleep(e.seconds + 2)
-        except Exception as err:
-            print(f"[TEXT ERROR] {str(err)}")
-            retry = False
-
-# BULK FORWARDING: Ab ye sirf SAVED MESSAGES me chalegi aur Railway ke channels use karegi
+# 4. FIXED BULK FORWARDING (Direct Server Forwarding - Zero Uploading, Fully Invisible)
 @bot.on(events.NewMessage(pattern=r",forward (\d+)", outgoing=True))
 async def bulk_forward(event):
     global SOURCE_CHAT, DEST_CHAT
     
-    # Check karega ki command sirf Saved Messages me maari gayi ho
-    if event.chat_id != (await bot.get_me()).id:
-        return
-
     if not SOURCE_CHAT or not DEST_CHAT:
-        await event.edit("❌ **Railway variables me SOURCE_CHAT aur DEST_CHAT set nahi hai!**")
+        await event.edit("❌ **Railway Variables check karo! SOURCE_CHAT/DEST_CHAT missing hai.**")
         return
         
     count = int(event.pattern_match.group(1))
-    await event.edit(f"⏳ **Saved Messages Command Detected!**\nSource se pichle {count} messages target destination me bhej raha hoon...")
+    await event.edit(f"⏳ **Direct Server-Side Copy Active!**\nPichle `{count}` messages bina online aaye bhej raha hoon...")
     
-    messages_to_forward = []
+    # Source chat se saare message IDs nikalna
+    msg_ids = []
     async for msg in bot.iter_messages(SOURCE_CHAT, limit=count):
-        messages_to_forward.append(msg)
+        msg_ids.append(msg.id)
     
-    messages_to_forward.reverse()
+    # Purane se naye sequence me karne ke liye reverse
+    msg_ids.reverse()
     
+    # Chunk me forward karna taaki flood wait na aaye
     success_count = 0
-    for msg in messages_to_forward:
+    chunk_size = 10  # Ek baar me 10 message
+    
+    for i in range(0, len(msg_ids), chunk_size):
+        await force_offline() # Send karne se theek pehle offline push karna
+        chunk = msg_ids[i:i+chunk_size]
         try:
-            if msg.media and not msg.sticker:
-                media_file = await bot.download_media(msg)
-                if media_file:
-                    await safe_send(DEST_CHAT, media_file, msg, is_sticker=False)
-                    try: os.remove(media_file) 
-                    except: pass
-                success_count += 1
-            elif msg.sticker:
-                sticker_file = await bot.download_media(msg)
-                if sticker_file:
-                    await safe_send(DEST_CHAT, sticker_file, msg, is_sticker=True)
-                    try: os.remove(sticker_file)
-                    except: pass
-                success_count += 1
-            elif msg.message:
-                await safe_send_text(DEST_CHAT, msg)
-                success_count += 1
-            
-            await asyncio.sleep(1.5)
-            
+            # Direct server forward logic (Isme download/upload nahi hota, direct copy hota hai)
+            await bot.forward_messages(DEST_CHAT, chunk, SOURCE_CHAT)
+            success_count += len(chunk)
+            await asyncio.sleep(2)  # Safe delay
+        except FloodWaitError as e:
+            await asyncio.sleep(e.seconds + 2)
         except Exception as e:
-            print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}")
+            print(f"[BULK CHUNK ERROR] {str(e)}")
             
-    await event.respond(f"✅ **Bulk Forwarding Complete!**\nTotal `{success_count}` messages safely copy ho gaye.")
+    await event.respond(f"✅ **Done!** `{success_count}` messages safely copied via server.")
 
-# LIVE FORWARDER (Naye real-time messages ke liye)
+# 5. LIVE FORWARDER (With Anti-Online Guard)
 @bot.on(events.NewMessage)
 async def main_forwarder(event):
     global SOURCE_CHAT, DEST_CHAT
@@ -132,28 +87,15 @@ async def main_forwarder(event):
         return
         
     if event.chat_id == SOURCE_CHAT:
+        await force_offline() # Live message aate hi pehle offline force karo
         try:
-            if event.media and not event.sticker:
-                media_file = await bot.download_media(event.message)
-                if media_file:
-                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=False)
-                    try: os.remove(media_file)
-                    except: pass
-            elif event.sticker:
-                media_file = await bot.download_media(event.message)
-                if media_file:
-                    await safe_send(DEST_CHAT, media_file, event.message, is_sticker=True)
-                    try: os.remove(media_file)
-                    except: pass
-            elif event.message.message:
-                await safe_send_text(DEST_CHAT, event.message)
-                
+            # Direct forward single message to prevent downloading overhead
+            await bot.forward_messages(DEST_CHAT, event.message)
         except Exception as e:
             print(f"[LIVE ERROR] {str(e)}")
 
-# MAIN EXECUTION
 if __name__ == "__main__":
     print("🚀 Telethon Bot Engine Successfully Activated 24/7!")
     bot.start()
-    bot.loop.create_task(keep_offline())
+    bot.loop.create_task(keep_offline_loop())
     bot.run_until_disconnected()
