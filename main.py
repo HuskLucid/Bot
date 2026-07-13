@@ -12,12 +12,16 @@ class SimpleWebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/html")
         self.end_headers()
         self.wfile.write(b"Bot Engine is Alive and Running 24/7!")
+        
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
 
 def run_ping_server():
-    # Render default me 10000 port use karta hai
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), SimpleWebHandler)
-    print(f"🌍 Ping Server started on port {port}")
+    print(f"🌍 Ping Server started on port {port}", flush=True)
     server.serve_forever()
 
 # --- CONFIGURATION FROM RENDER ---
@@ -45,7 +49,7 @@ from telethon.sessions import StringSession
 user_client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 helper_bot = TelegramClient('helper_bot_session', API_ID, API_HASH)
 
-print("=== TELETHON ULTRA SECURE FORWARDER STARTING ===")
+print("=== TELETHON ULTRA SECURE FORWARDER STARTING ===", flush=True)
 
 async def bot_send_media(entity, file_path, msg_obj, is_sticker=False):
     try:
@@ -61,7 +65,7 @@ async def bot_send_media(entity, file_path, msg_obj, is_sticker=False):
     except FloodWaitError as e:
         await asyncio.sleep(e.seconds + 2)
     except Exception as err:
-        print(f"[BOT SEND ERROR] {str(err)}")
+        print(f"[BOT SEND ERROR] {str(err)}", flush=True)
 
 async def bot_send_text(entity, msg_obj):
     try:
@@ -73,7 +77,7 @@ async def bot_send_text(entity, msg_obj):
     except FloodWaitError as e:
         await asyncio.sleep(e.seconds + 2)
     except Exception as err:
-        print(f"[BOT TEXT ERROR] {str(err)}")
+        print(f"[BOT TEXT ERROR] {str(err)}", flush=True)
 
 # BULK FORWARDING FROM DESTINATION CHANNEL
 @user_client.on(events.NewMessage(pattern=r",forward (\d+)", outgoing=True))
@@ -117,7 +121,7 @@ async def bulk_forward(event):
                 success_count += 1
             await asyncio.sleep(1.5)
         except Exception as e:
-            print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}")
+            print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}", flush=True)
             
     await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully copied.")
 
@@ -144,16 +148,28 @@ async def main_forwarder(event):
             elif event.message.message:
                 await bot_send_text(DEST_CHAT, event.message)
         except Exception as e:
-            print(f"[LIVE ERROR] {str(e)}")
+            print(f"[LIVE ERROR] {str(e)}", flush=True)
 
+# HANG-PROOF STARTUP LOGIC
 async def start_engines():
-    print("🚀 Telethon Hybrid Engine Activating...")
-    await user_client.start()
-    await helper_bot.start(bot_token=BOT_TOKEN)
-    print("🚀 Dual Engine Successfully Activated 24/7!")
-    await user_client.run_until_disconnected()
+    print("🚀 Telethon Hybrid Engine Activating...", flush=True)
+    try:
+        # User client ko bina hang kiye connect karna
+        await user_client.connect()
+        if not await user_client.is_user_authorized():
+            print("❌ [CRITICAL] SESSION_STRING EXPIRED YA GALAT HAI! Bot login nahi kar pa raha.", flush=True)
+            return
+        
+        print("✅ User Account Successfully Connected!", flush=True)
+        
+        # Helper Bot start karna
+        await helper_bot.start(bot_token=BOT_TOKEN)
+        print("🚀 Dual Engine Successfully Activated 24/7!", flush=True)
+        
+        await user_client.run_until_disconnected()
+    except Exception as e:
+        print(f"❌ [STARTUP ERROR] {str(e)}", flush=True)
 
 if __name__ == "__main__":
-    # Web server ko alag thread me chalana taaki bot block na ho
     threading.Thread(target=run_ping_server, daemon=True).start()
     asyncio.run(start_engines())
