@@ -2,8 +2,25 @@ import os
 import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
-# --- CONFIGURATION FROM RAILWAY ---
+# --- DUMMY WEB SERVER FOR RENDER PING ---
+class SimpleWebHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"Bot Engine is Alive and Running 24/7!")
+
+def run_ping_server():
+    # Render default me 10000 port use karta hai
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), SimpleWebHandler)
+    print(f"🌍 Ping Server started on port {port}")
+    server.serve_forever()
+
+# --- CONFIGURATION FROM RENDER ---
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "your_hash")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
@@ -25,14 +42,11 @@ DEST_CHAT = parse_chat_id(os.environ.get("DEST_CHAT", ""))
 
 from telethon.sessions import StringSession
 
-# User Engine (Sirf Read/Download karega - Fully Invisible)
 user_client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-# Bot Engine (Sirf Upload/Post karega Destination me)
 helper_bot = TelegramClient('helper_bot_session', API_ID, API_HASH)
 
 print("=== TELETHON ULTRA SECURE FORWARDER STARTING ===")
 
-# Helper: Media Sender via Bot
 async def bot_send_media(entity, file_path, msg_obj, is_sticker=False):
     try:
         if is_sticker:
@@ -49,7 +63,6 @@ async def bot_send_media(entity, file_path, msg_obj, is_sticker=False):
     except Exception as err:
         print(f"[BOT SEND ERROR] {str(err)}")
 
-# Helper: Text Sender via Bot
 async def bot_send_text(entity, msg_obj):
     try:
         await helper_bot.send_message(
@@ -66,17 +79,14 @@ async def bot_send_text(entity, msg_obj):
 @user_client.on(events.NewMessage(pattern=r",forward (\d+)", outgoing=True))
 async def bulk_forward(event):
     global SOURCE_CHAT, DEST_CHAT
-    
-    # Check ki command sirf hmare destination channel me hi trigger ho
     if event.chat_id != DEST_CHAT:
         return
-
     if not SOURCE_CHAT or not DEST_CHAT:
-        await event.edit("❌ **Railway Variables check karo! SOURCE_CHAT/DEST_CHAT missing hai.**")
+        await event.edit("❌ **Variables missing hain!**")
         return
         
     count = int(event.pattern_match.group(1))
-    await event.edit(f"⏳ **Processing Bulk Forwarding...**\n`{count}` restricted posts copy ho rahi hain...")
+    await event.edit(f"⏳ **Processing Bulk Forwarding...**\n`{count}` posts copy ho rahi hain...")
     
     messages_to_forward = []
     async_messages = user_client.iter_messages(SOURCE_CHAT, limit=count)
@@ -105,13 +115,11 @@ async def bulk_forward(event):
             elif msg.message:
                 await bot_send_text(DEST_CHAT, msg)
                 success_count += 1
-            
             await asyncio.sleep(1.5)
-            
         except Exception as e:
             print(f"[BULK ERROR] Msg ID {msg.id}: {str(e)}")
             
-    await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully copied by Bot.")
+    await event.respond(f"✅ **Done!** `{success_count}` restricted messages successfully copied.")
 
 # LIVE FORWARDER
 @user_client.on(events.NewMessage)
@@ -119,7 +127,6 @@ async def main_forwarder(event):
     global SOURCE_CHAT, DEST_CHAT
     if not SOURCE_CHAT or not DEST_CHAT:
         return
-        
     if event.chat_id == SOURCE_CHAT:
         try:
             if event.media and not event.sticker:
@@ -136,20 +143,17 @@ async def main_forwarder(event):
                     except: pass
             elif event.message.message:
                 await bot_send_text(DEST_CHAT, event.message)
-                
         except Exception as e:
             print(f"[LIVE ERROR] {str(e)}")
 
-# MODERN ASYNCIO RUN FUNCTION FOR PYTHON 3.13
 async def start_engines():
     print("🚀 Telethon Hybrid Engine Activating...")
-    # Dono clients ko start karna bina loop mismatch ke
     await user_client.start()
     await helper_bot.start(bot_token=BOT_TOKEN)
     print("🚀 Dual Engine Successfully Activated 24/7!")
-    # Keep running
     await user_client.run_until_disconnected()
 
 if __name__ == "__main__":
-    # Python 3.13 full support fix
+    # Web server ko alag thread me chalana taaki bot block na ho
+    threading.Thread(target=run_ping_server, daemon=True).start()
     asyncio.run(start_engines())
