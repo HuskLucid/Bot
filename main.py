@@ -162,6 +162,29 @@ async def main_forwarder(event):
             print(f"[LIVE ERROR] {str(e)}", flush=True)
 
 # HANG-PROOF STARTUP LOGIC
+async def warmup_dest_entity():
+    if not DEST_CHAT:
+        return
+    try:
+        await helper_bot.get_input_entity(DEST_CHAT)
+        print("✅ Helper bot DEST channel ko pehchanta hai!", flush=True)
+        return
+    except (ValueError, TypeError):
+        pass
+    try:
+        await user_client.send_message(DEST_CHAT, "🚀 **Bot Engine Started!** (warm-up ping)")
+        for _ in range(10):
+            await asyncio.sleep(2)
+            try:
+                await helper_bot.get_input_entity(DEST_CHAT)
+                print("✅ DEST channel warm-up successful! Bot ab send kar sakta hai.", flush=True)
+                return
+            except (ValueError, TypeError):
+                continue
+        print("❌ [WARMUP FAILED] Helper bot DEST channel resolve nahi kar pa raha! FIX: Bot ko destination channel me ADMIN banao (Post Messages permission ke saath).", flush=True)
+    except Exception as e:
+        print(f"❌ [WARMUP ERROR] {str(e)} - Bot ko DEST channel me ADMIN banao!", flush=True)
+
 async def start_engines():
     print("🚀 Telethon Hybrid Engine Activating...", flush=True)
     try:
@@ -178,7 +201,9 @@ async def start_engines():
         # Helper Bot start karna
         await helper_bot.start(bot_token=BOT_TOKEN)
         print("🚀 Dual Engine Successfully Activated 24/7!", flush=True)
-        
+
+        await warmup_dest_entity()
+
         await user_client.run_until_disconnected()
     except Exception as e:
         print(f"❌ [STARTUP ERROR] {str(e)}", flush=True)
