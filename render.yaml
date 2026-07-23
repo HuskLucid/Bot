@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: telegram-forwarder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: SESSION_STRING
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: SOURCE_CHAT
+        sync: false
+      - key: DEST_CHAT
+        sync: false

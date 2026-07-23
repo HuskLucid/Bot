@@ -2,6 +2,7 @@ import os
 import asyncio
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
+from telethon.sessions import StringSession
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
@@ -35,16 +36,18 @@ def parse_chat_id(env_value):
         return None
     val = str(env_value).strip()
     if val.startswith('-100') or val.startswith('-') or val.isalpha():
-        try: return int(val)
-        except: return val
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return val
     else:
-        try: return int(f"-100{val}")
-        except: return val
+        try:
+            return int(f"-100{val}")
+        except (ValueError, TypeError):
+            return val
 
 SOURCE_CHAT = parse_chat_id(os.environ.get("SOURCE_CHAT", ""))
 DEST_CHAT = parse_chat_id(os.environ.get("DEST_CHAT", ""))
-
-from telethon.sessions import StringSession
 
 user_client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 helper_bot = TelegramClient('helper_bot_session', API_ID, API_HASH)
@@ -106,15 +109,19 @@ async def bulk_forward(event):
                 media_file = await user_client.download_media(msg)
                 if media_file:
                     await bot_send_media(DEST_CHAT, media_file, msg, is_sticker=False)
-                    try: os.remove(media_file) 
-                    except: pass
+                    try:
+                        os.remove(media_file)
+                    except OSError:
+                        pass
                 success_count += 1
             elif msg.sticker:
                 sticker_file = await user_client.download_media(msg)
                 if sticker_file:
                     await bot_send_media(DEST_CHAT, sticker_file, msg, is_sticker=True)
-                    try: os.remove(sticker_file)
-                    except: pass
+                    try:
+                        os.remove(sticker_file)
+                    except OSError:
+                        pass
                 success_count += 1
             elif msg.message:
                 await bot_send_text(DEST_CHAT, msg)
@@ -137,14 +144,18 @@ async def main_forwarder(event):
                 media_file = await user_client.download_media(event.message)
                 if media_file:
                     await bot_send_media(DEST_CHAT, media_file, event.message, is_sticker=False)
-                    try: os.remove(media_file)
-                    except: pass
+                    try:
+                        os.remove(media_file)
+                    except OSError:
+                        pass
             elif event.sticker:
                 media_file = await user_client.download_media(event.message)
                 if media_file:
                     await bot_send_media(DEST_CHAT, media_file, event.message, is_sticker=True)
-                    try: os.remove(media_file)
-                    except: pass
+                    try:
+                        os.remove(media_file)
+                    except OSError:
+                        pass
             elif event.message.message:
                 await bot_send_text(DEST_CHAT, event.message)
         except Exception as e:
@@ -158,7 +169,9 @@ async def start_engines():
         await user_client.connect()
         if not await user_client.is_user_authorized():
             print("❌ [CRITICAL] SESSION_STRING EXPIRED YA GALAT HAI! Bot login nahi kar pa raha.", flush=True)
-            return
+            while True:
+                await asyncio.sleep(3600)
+                print("❌ [REMINDER] SESSION_STRING invalid hai - naya session string generate karke env var update karo.", flush=True)
         
         print("✅ User Account Successfully Connected!", flush=True)
         
